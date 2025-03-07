@@ -125,6 +125,77 @@ jobs:
             aws iam attach-role-policy --role-name "$SONG_LAMBDA_IAM_ROLE" --policy-arn arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
             aws iam attach-role-policy --role-name "$SONG_LAMBDA_IAM_ROLE" --policy-arn arn:aws:iam::aws:policy/SecretsManagerReadWrite
           fi
+
+      - name: Create lambda functions.
+        run: |
+          AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          AUTH_REPO_URI="$AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/$AUTH_SERVICE_IMAGE:latest"
+          SONG_REPO_URI="$AWS_ACCOUNT_ID.dkr.ecr.us-east-1.amazonaws.com/$SONG_SERVICE_IMAGE:latest"
+          AUTH_IAM_ROLE_ARN="arn:aws:iam::$AWS_ACCOUNT_ID:role/$AUTH_LAMBDA_IAM_ROLE"
+          SONG_IAM_ROLE_ARN="arn:aws:iam::$AWS_ACCOUNT_ID:role/$SONG_LAMBDA_IAM_ROLE"
+
+          # Create or update the Lambda function that serves the API
+          if aws lambda get-function --function-name "$AUTH_LAMBDA_FUNCTION" > /dev/null 2>&1; then
+              # Lambda function exists
+              echo "$AUTH_LAMBDA_FUNCTION existence confirmed, updating to new image..."
+              aws lambda update-function-code --function-name "$AUTH_LAMBDA_FUNCTION" --image-uri "$AUTH_REPO_URI"
+          else
+              # Lambda function does not exist
+              echo "$AUTH_LAMBDA_FUNCTION 'lambda' does not exist. Creating..."
+              aws lambda create-function --function-name "$AUTH_LAMBDA_FUNCTION" --package-type Image --code ImageUri="$AUTH_REPO_URI" --role "$AUTH_IAM_ROLE_ARN"
+          fi
+
+          if aws lambda get-function --function-name "$SONG_LAMBDA_FUNCTION" > /dev/null 2>&1; then
+              # Lambda function exists
+              echo "$SONG_LAMBDA_FUNCTION existence confirmed, updating to new image..."
+              aws lambda update-function-code --function-name "$SONG_LAMBDA_FUNCTION" --image-uri "$SONG_REPO_URI"
+          else
+              # Lambda function does not exist
+              echo "$SONG_LAMBDA_FUNCTION 'lambda' does not exist. Creating..."
+              aws lambda create-function --function-name "$SONG_LAMBDA_FUNCTION" --package-type Image --code ImageUri="$SONG_REPO_URI" --role "$SONG_IAM_ROLE_ARN"
+          fi
+
+          sleep 3
+
+          if aws lambda get-function-url-config --function-name "$AUTH_LAMBDA_FUNCTION" > /dev/null 2>&1; then
+              echo "$AUTH_LAMBDA_FUNCTION URL existence confirmed. No action needed."
+          else
+
+              echo "$AUTH_LAMBDA_FUNCTION 'URL' does not exist. Creating..."
+              aws lambda create-function-url-config --function-name "$AUTH_LAMBDA_FUNCTION" --auth-type NONE
+          fi
+
+          if aws lambda get-function-url-config --function-name "$SONG_LAMBDA_FUNCTION" > /dev/null 2>&1; then
+              echo "$SONG_LAMBDA_FUNCTION URL existence confirmed. No action needed."
+          else
+
+              echo "$SONG_LAMBDA_FUNCTION 'URL' does not exist. Creating..."
+              aws lambda create-function-url-config --function-name "$SONG_LAMBDA_FUNCTION" --auth-type NONE
+          fi
+
+          if aws lambda get-policy --function-name "$AUTH_LAMBDA_FUNCTION" > /dev/null 2>&1; then
+              echo "$AUTH_LAMBDA_FUNCTION policy existence confirmed. No action needed."
+          else
+              echo "$AUTH_LAMBDA_FUNCTION 'policy' does not exist. Creating..."
+              aws lambda add-permission \
+                  --function-name "$AUTH_LAMBDA_FUNCTION" \
+                  --principal '*' \
+                  --statement-id FunctionUrlAllowPublicAccess \
+                  --action lambda:InvokeFunctionUrl \
+                  --function-url-auth-type NONE
+          fi
+
+          if aws lambda get-policy --function-name "$SONG_LAMBDA_FUNCTION" > /dev/null 2>&1; then
+              echo "$SONG_LAMBDA_FUNCTION policy existence confirmed. No action needed."
+          else
+              echo "$SONG_LAMBDA_FUNCTION 'policy' does not exist. Creating..."
+              aws lambda add-permission \
+                  --function-name "$SONG_LAMBDA_FUNCTION" \
+                  --principal '*' \
+                  --statement-id FunctionUrlAllowPublicAccess \
+                  --action lambda:InvokeFunctionUrl \
+                  --function-url-auth-type NONE
+          fi
       
 
   
